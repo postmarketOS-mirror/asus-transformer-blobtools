@@ -37,18 +37,24 @@ main (int argc, char **argv)
   partition_item *partitions,*curr_part;
   FILE *outfile;
   part_type *parts;
+  int signedBlob = 0;
+  int genericArgs = GENERIC_ARGS;
+  
+  if (argc > 1 && 0 == memcmp(argv[1], "-s", 2))
+  {
+    signedBlob = 1;
+    genericArgs++;
+  }
 
-  memset (&hdr, 0, sizeof (header_type));
-
-  if (argc < (GENERIC_ARGS+2)) // Require at least one partition
-    {
-      fprintf (stderr,"Usage: %s <outfile> <partitionname> <partitionfile> ...\n", argv[0]);
-      fprintf(stderr, "Any number of partitionname partitionfilename entries can be entered\n");
+  if (argc < (genericArgs + 2)) // Require at least one partition
+  {
+      fprintf(stderr, "usage: %s [-s] outfile partitionname partitionfile [partitionname partitionfile] ...\n", argv[0]);
+      fprintf(stderr, "Any number of [partitionname partitionfilename] pair entries can be entered\n");
       return -1;
-    }
+  }
 
-  outname = argv[1];
-  partnums = argc - GENERIC_ARGS; 
+  outname = argv[genericArgs - 1];
+  partnums = argc - genericArgs; 
 
   if(partnums <= 0 || partnums % 2 != 0)
   {
@@ -61,7 +67,7 @@ main (int argc, char **argv)
   printf("Found %d partitions as commandline arguments\n", partnums);
   partitions = (partition_item*)calloc(partnums, sizeof(partition_item));
   curr_part = partitions;
-  for(i=GENERIC_ARGS; i<argc; i+=2)
+  for(i=genericArgs; i<argc; i+=2)
   {
     printf("Partname: %s Filename: %s\n", argv[i], argv[i+1]);
     curr_part->part_name = argv[i];
@@ -69,16 +75,29 @@ main (int argc, char **argv)
     curr_part++;
   };
 
+  // Setup header
+  memset(&hdr, 0, sizeof (header_type));
   memcpy(hdr.magic, MAGIC, MAGIC_SIZE);
   hdr.version = 0x00010000; // Taken from 
   hdr.size = hdr.part_offset = sizeof(header_type);
   hdr.num_parts = partnums;
+  memset(hdr.unknown, 0, sizeof (hdr.unknown));
 
   outfile = fopen (outname, "wb");
-  fwrite (&hdr, sizeof (header_type), 1, outfile);
+  
+  // Write secure header or normal header to file
+  if (signedBlob) {
+    printf("Signing blob\n");
+    secure_header_type shdr;
+    memcpy(shdr.magic, SECURE_MAGIC, SECURE_MAGIC_SIZE);
+    shdr.datalen = shdr.siglen = 0;
+    shdr.real_header = hdr;
+    fwrite (&shdr, sizeof (secure_header_type), 1, outfile);
+  } else {
+    fwrite (&hdr, sizeof (header_type), 1, outfile);
+  }
   printf ("Size: %d\n", hdr.size);
-  printf ("%d partitions starting at offset 0x%X\n", hdr.num_parts,
-	  hdr.part_offset);
+  printf ("%d partitions starting at offset 0x%X\n", hdr.num_parts, hdr.part_offset);
 
   parts = (part_type *)calloc (hdr.num_parts, sizeof (part_type));
   memset(parts, 0, sizeof(part_type)*hdr.num_parts);
